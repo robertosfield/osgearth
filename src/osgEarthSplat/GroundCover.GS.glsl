@@ -4,7 +4,10 @@ $GLSL_DEFAULT_PRECISION_FLOAT
 #pragma vp_entryPoint oe_GroundCover_geom
 #pragma vp_location   geometry
 
-#pragma import_defines(OE_IS_SHADOW_CAMERA, OE_GROUNDCOVER_MASK_SAMPLER, OE_GROUNDCOVER_MASK_MATRIX, OE_GROUNDCOVER_SHOW_TESSELLATION)
+#pragma import_defines(OE_IS_SHADOW_CAMERA)
+#pragma import_defines(OE_GROUNDCOVER_MASK_SAMPLER)
+#pragma import_defines(OE_GROUNDCOVER_MASK_MATRIX)
+#pragma import_defines(OE_GROUNDCOVER_SHOW_TESSELLATION)
                 
 layout(triangles) in;        // triangles from the TileDrawable
 
@@ -306,7 +309,7 @@ oe_GroundCover_geom()
 
 #else // normal render camera - draw as a billboard:
 
-    vec3 tangentVector = normalize(cross(vec3(0,0,-1), up_view));
+    vec3 tangentVector = normalize(cross(center_view.xyz, up_view));
     vec3 halfWidthTangentVector = tangentVector * 0.5 * width;
     vec3 heightVector = up_view*height;
         

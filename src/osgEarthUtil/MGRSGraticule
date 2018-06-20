@@ -115,7 +115,7 @@ namespace osgEarth { namespace Util
 
         virtual void removedFromMap(const Map* map);
         
-        virtual osg::Node* getOrCreateNode();
+        virtual osg::Node* getNode() const;
 
         virtual void init();
 
@@ -134,8 +134,6 @@ namespace osgEarth { namespace Util
         osg::ref_ptr<const Profile> _profile;
 
         osg::ref_ptr<FeatureProfile> _featureProfile;
-
-        osg::ref_ptr<osg::ClipPlane> _clipPlane;
 
         osg::ref_ptr<osg::Group> _root;
 

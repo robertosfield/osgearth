@@ -1,3 +1,4 @@
+
 /* -*-c++-*- */
 /* osgEarth - Dynamic map generation toolkit for OpenSceneGraph
  * Copyright 2016 Pelican Mapping
@@ -19,6 +20,7 @@
 #include <osgEarth/Layer>
 #include <osgEarth/Registry>
 #include <osgEarth/ShaderLoader>
+#include <osgEarth/SceneGraphCallback>
 #include <osgDB/Registry>
 #include <osgUtil/CullVisitor>
 
@@ -40,6 +42,13 @@ ConfigOptions(co)
     fromConfig(_conf);
 }
 
+void
+LayerOptions::setDefaults()
+{
+    _enabled.init(true);
+    _terrainPatch.init(false);
+}
+
 Config LayerOptions::getConfig() const
 {
     Config conf = ConfigOptions::getConfig();
@@ -50,17 +59,20 @@ Config LayerOptions::getConfig() const
         conf.setObj("cache_policy", _cachePolicy);
     conf.set("shader_define", _shaderDefine);
     conf.set("shader", _shader);
+    conf.set("attribution", _attribution);
+    conf.set("terrain", _terrainPatch);
     return conf;
 }
 
 void LayerOptions::fromConfig(const Config& conf)
 {
-    _enabled.init(true);
+    setDefaults();
 
     conf.getIfSet("name", _name);
     conf.getIfSet("enabled", _enabled);
     conf.getIfSet("cache_id", _cacheId); // compat
     conf.getIfSet("cacheid", _cacheId);
+    conf.getIfSet("attribution", _attribution);
     conf.getObjIfSet("cache_policy", _cachePolicy);
 
     // legacy support:
@@ -73,6 +85,9 @@ void LayerOptions::fromConfig(const Config& conf)
     }
     conf.getIfSet("shader_define", _shaderDefine);
     conf.getIfSet("shader", _shader);
+
+    conf.getIfSet("terrain", _terrainPatch);
+    conf.getIfSet("patch", _terrainPatch);
 }
 
 void LayerOptions::mergeConfig(const Config& conf)
@@ -106,12 +121,6 @@ Layer::~Layer()
 {
     OE_DEBUG << LC << "~Layer\n";
 }
-
-//void
-//Layer::setReadOptions(const osgDB::Options* options)
-//{
-//    _readOptions = Registry::cloneOrCreateOptions(options);
-//}
 
 void
 Layer::setReadOptions(const osgDB::Options* readOptions)
@@ -195,6 +204,9 @@ Layer::setEnabled(bool value)
 void
 Layer::init()
 {
+    // For detecting scene graph changes at runtime
+    _sceneGraphCallbacks = new SceneGraphCallbacks(this);
+
     // Copy the layer options name into the Object name.
     // This happens here AND in open.
     if (options().name().isSet())
@@ -211,7 +223,7 @@ Layer::open()
     {
         osg::Object::setName(options().name().get());
     }
-    
+
     // Install any shader #defines
     if (options().shaderDefine().isSet() && !options().shaderDefine()->empty())
     {
@@ -305,6 +317,12 @@ Layer::getConfigOptions(const osgDB::Options* options)
     return data ? *static_cast<const ConfigOptions*>(data) : s_default;
 }
 
+SceneGraphCallbacks*
+Layer::getSceneGraphCallbacks() const
+{
+    return _sceneGraphCallbacks.get();
+}
+
 void
 Layer::addCallback(LayerCallback* cb)
 {
@@ -315,7 +333,7 @@ void
 Layer::removeCallback(LayerCallback* cb)
 {
     CallbackVector::iterator i = std::find( _callbacks.begin(), _callbacks.end(), cb );
-    if ( i != _callbacks.end() ) 
+    if ( i != _callbacks.end() )
         _callbacks.erase( i );
 }
 
@@ -353,4 +371,21 @@ Layer::fireCallback(LayerCallback::MethodPtr method)
         LayerCallback* cb = dynamic_cast<LayerCallback*>(i->get());
         if (cb) (cb->*method)(this);
     }
+}
+
+std::string
+Layer::getAttribution() const
+{
+    // Get the attribution from the layer if it's set.
+    if (_options->attribution().isSet())
+    {
+        return *_options->attribution();
+    }
+    return "";
+}
+
+void
+Layer::setAttribution(const std::string& attribution)
+{
+    _options->attribution() = attribution;
 }

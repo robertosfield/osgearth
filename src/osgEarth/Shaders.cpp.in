@@ -6,6 +6,10 @@ namespace osgEarth
 {
     Shaders::Shaders()
     {
+        // Clip Plane
+        ClipPlane = "ClipPlane.glsl";
+        _sources[ClipPlane] = "@ClipPlane.glsl@";
+
         // Depth Offset
         DepthOffsetVertex = "DepthOffset.vert.glsl";
        _sources[DepthOffsetVertex] = "@DepthOffset.vert.glsl@";
@@ -34,6 +38,9 @@ namespace osgEarth
         InstancingVertex = "Instancing.vert.glsl";
         _sources[InstancingVertex] = "@Instancing.vert.glsl@";
 
+        // LineDrawable
+        LineDrawable = "LineDrawable.glsl";
+        _sources[LineDrawable] = "@LineDrawable.glsl@";        
 
         // PhongLightingEffect
         PhongLightingVertex = "PhongLighting.vert.glsl";
@@ -41,5 +48,12 @@ namespace osgEarth
         
         PhongLightingFragment = "PhongLighting.frag.glsl";
         _sources[PhongLightingFragment] = "@PhongLighting.frag.glsl@";
+
+		// Text
+		TextVertex = "Text.vert.glsl";
+		_sources[TextVertex] = "@Text.vert.glsl@";
+
+		TextFragment = "Text.frag.glsl";
+		_sources[TextFragment] = "@Text.frag.glsl@";
     }
 };

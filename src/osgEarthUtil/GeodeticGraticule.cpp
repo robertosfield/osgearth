@@ -40,7 +40,7 @@ REGISTER_OSGEARTH_LAYER(geodetic_graticule, GeodeticGraticule);
 
 namespace
 {
-    // Helper class to find a MapNode and set it in the graticule 
+    // Helper class to find a MapNode and set it in the graticule
     // so it can install the terrain effect.
     struct MyGroup : public osg::Group
     {
@@ -50,7 +50,7 @@ namespace
         MyGroup(GeodeticGraticule* grat, osg::ref_ptr<MapNode>& mapNode)
             : _grat(grat), _mapNode(mapNode)
         {
-            // Require an update traversal to udpate the labels.
+            // Require an update traversal to update the labels.
             setNumChildrenRequiringUpdateTraversal(1);
         }
 
@@ -163,7 +163,7 @@ GeodeticGraticule::init()
         for (unsigned int i = 0; i < tokens.size(); i++)
         {
             double r = as<double>(tokens[i], -1.0);
-            if (r > 0) 
+            if (r > 0)
             {
                 _resolutions.push_back( r );
             }
@@ -193,6 +193,8 @@ GeodeticGraticule::init()
 
     // Initialize the formatter
     _formatter = new LatLongFormatter(osgEarth::Util::LatLongFormatter::FORMAT_DEGREES_MINUTES_SECONDS_TERSE, LatLongFormatter::USE_SYMBOLS |LatLongFormatter::USE_PREFIXES);
+    
+    _root = new MyGroup(this, _mapNode);
 }
 
 void
@@ -219,14 +221,8 @@ GeodeticGraticule::removedFromMap(const Map* map)
 }
 
 osg::Node*
-GeodeticGraticule::getOrCreateNode()
+GeodeticGraticule::getNode() const
 {
-    if (_root.valid() == false)
-    {
-        _root = new MyGroup(this, _mapNode);
-        rebuild();
-    }
-
     return _root.get();
 }
 
@@ -234,11 +230,54 @@ void
 GeodeticGraticule::setVisible(bool value)
 {
     VisibleLayer::setVisible(value);
+    updateGridLineVisibility();
+}
 
-    if (getVisible())
+void
+GeodeticGraticule::updateGridLineVisibility()
+{
+    if (getVisible() && *_options->gridLinesVisible())
         installEffect();
     else
         removeEffect();
+}
+
+bool
+GeodeticGraticule::getGridLinesVisible() const
+{
+    return *_options->gridLinesVisible();
+}
+
+void
+GeodeticGraticule::setGridLinesVisible(bool gridLinesVisible)
+{
+    _options->gridLinesVisible() = gridLinesVisible;
+    updateGridLineVisibility();
+}
+
+
+bool
+GeodeticGraticule::getGridLabelsVisible() const
+{
+    return *_options->gridLabelsVisible();
+}
+
+void
+GeodeticGraticule::setGridLabelsVisible(bool gridLabelsVisible)
+{
+    _options->gridLabelsVisible() = gridLabelsVisible;
+}
+
+bool
+GeodeticGraticule::getEdgeLabelsVisible() const
+{
+    return *_options->edgeLabelsVisible();
+}
+
+void
+GeodeticGraticule::setEdgeLabelsVisible(bool edgeLabelsVisible)
+{
+    _options->edgeLabelsVisible() = edgeLabelsVisible;
 }
 
 void
@@ -297,7 +336,7 @@ GeodeticGraticule::installEffect()
     Shaders package;
     package.load(vp, package.Graticule_Vertex);
     package.load(vp, package.Graticule_Fragment);
-    
+
     stateset->addUniform(new osg::Uniform(COLOR_UNIFORM, options().color().get()));
     stateset->addUniform(new osg::Uniform(WIDTH_UNIFORM, options().lineWidth().get()));
 }
@@ -438,7 +477,7 @@ GeodeticGraticule::getViewExtent(osgUtil::CullVisitor* cullVisitor) const
     osg::Matrixd mv = *cullVisitor->getModelViewMatrix();
     osg::Matrixd invmv = osg::Matrixd::inverse( mv );
 
-    // clamp the projection far plane so it's not on the other 
+    // clamp the projection far plane so it's not on the other
     // side of the globe
     osg::Vec3d eye = osg::Vec3d(0,0,0) * invmv;
 
@@ -447,7 +486,7 @@ GeodeticGraticule::getViewExtent(osgUtil::CullVisitor* cullVisitor) const
     double nearPlane, farPlane;
     double nLeft, nRight, nTop, nBottom;
     double fLeft, fRight, fTop, fBottom;
-    
+
     if (osg::equivalent(proj(3,3), 1.0)) // ORTHOGRAPHIC
     {
         proj.getOrtho(nLeft, nRight, nBottom, nTop, nearPlane, farPlane);
@@ -469,7 +508,7 @@ GeodeticGraticule::getViewExtent(osgUtil::CullVisitor* cullVisitor) const
         proj.getPerspective(f,a,zn,zf);
         zf = std::min(zf, eye.length()-1000.0);
         proj.makePerspective(f, a, zn, zf);
-       
+
         nearPlane = proj(3,2) / (proj(2,2)-1.0);
         farPlane = proj(3,2) / (1.0+proj(2,2));
 
@@ -515,7 +554,7 @@ GeodeticGraticule::getViewExtent(osgUtil::CullVisitor* cullVisitor) const
     center.fromWorld(srs, bs.center());
 
     double radiusDegrees = bs.radius() / 111000.0;
-    
+
     // Try to clamp the maximum radius so far out views don't go wacky.
     radiusDegrees = osg::minimum(radiusDegrees, 90.0);
 
@@ -530,11 +569,11 @@ GeodeticGraticule::getViewExtent(osgUtil::CullVisitor* cullVisitor) const
 }
 
 
-void 
+void
 GeodeticGraticule::updateLabels()
 {
     const osgEarth::SpatialReference* srs = osgEarth::SpatialReference::create("wgs84");
-    
+
     Threading::ScopedMutexLock lock(_cameraDataMapMutex);
     for (CameraDataMap::iterator itr = _cameraDataMap.begin(); itr != _cameraDataMap.end(); ++itr)
     {
@@ -553,10 +592,9 @@ GeodeticGraticule::updateLabels()
             extents.push_back( cdata._viewExtent );
         }
 
-
         _labelingEngine->setResolution(cdata._resolution);
 
-        bool showSideLabels = cdata._resolution < 0.03;
+        bool showSideLabels = *_options->edgeLabelsVisible() && cdata._resolution < 0.03;
         _labelingEngine->setNodeMask(showSideLabels ? ~0u : 0);
 
         double resDegrees = cdata._resolution * 180.0;
@@ -571,12 +609,12 @@ GeodeticGraticule::updateLabels()
 
         // Approximate offset in degrees
         double degOffset = cdata._metersPerPixel / 111000.0;
-     
+
         unsigned int labelIndex = 0;
 
 
         // Only show the centered labels if the side labels aren't visible.
-        if (!showSideLabels || !_labelingEngine->getVisible(itr->first))
+        if (*_options->gridLabelsVisible() && (!showSideLabels || !_labelingEngine->getVisible(itr->first)))
         {
             bool done = false;
             for (unsigned int extentIndex = 0; extentIndex < extents.size() && !done; extentIndex++)
@@ -657,7 +695,7 @@ GeodeticGraticule::getCameraData(osg::Camera* cam) const
 
 std::string
 GeodeticGraticule::getText(const GeoPoint& location, bool lat)
-{ 
+{
     double value = lat ? location.y() : location.x();
     return _formatter->format(value, lat);
 }

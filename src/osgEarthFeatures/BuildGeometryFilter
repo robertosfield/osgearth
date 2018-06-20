@@ -97,11 +97,10 @@ namespace osgEarth { namespace Features
         const optional<Angle>& maxCreaseAngle() const { return _maximumCreaseAngle; }
 
         /**
-         * Whether to use GPU-generated geometry for lines with pixel width, as a replacement
-         * for the glLineWidth attribute
+         * Shader policy to use when appropriate
          */
-        optional<bool>& useGPULines() { return _useGPULines; }
-        const optional<bool>& useGPULines() const { return _useGPULines; }
+        optional<ShaderPolicy>& shaderPolicy() { return _shaderPolicy; }
+        const optional<ShaderPolicy>& shaderPolicy() const { return _shaderPolicy; }
 
     protected:
         Style                      _style;
@@ -112,7 +111,7 @@ namespace osgEarth { namespace Features
         optional<float>            _maxPolyTilingAngle_deg;
         optional<bool>             _optimizeVertexOrdering;
         optional<Angle>            _maximumCreaseAngle;
-        optional<bool>             _useGPULines;
+        optional<ShaderPolicy>     _shaderPolicy;
         
         void tileAndBuildPolygon(
             Geometry*               input,
@@ -132,7 +131,7 @@ namespace osgEarth { namespace Features
             const osg::Matrixd      &world2local);
 
         osg::Geode* processPolygons        (FeatureList& input, FilterContext& cx);
-        osg::Geode* processLines           (FeatureList& input, FilterContext& cx);
+        osg::Group* processLines           (FeatureList& input, FilterContext& cx);
         osg::Group* processPolygonizedLines(FeatureList& input, bool twosided, FilterContext& cx);
         osg::Geode* processPoints          (FeatureList& input, FilterContext& cx);
     };

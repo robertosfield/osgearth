@@ -27,6 +27,7 @@
 #include <osgEarthSymbology/ResourceLibrary>
 #include <osgEarthSymbology/Skins>
 #include <osgEarth/Utils>
+#include <osgEarth/Lighting>
 
 #include <osg/ArgumentParser>
 #include <osgDB/FileUtils>
@@ -233,10 +234,9 @@ show(osg::ArgumentParser& arguments)
     geode2->addDrawable(geom);
     osg::Vec3Array* v = new osg::Vec3Array();
     geom->setVertexArray( v );
-    osg::Vec4Array* c = new osg::Vec4Array(1);
+    osg::Vec4Array* c = new osg::Vec4Array(osg::Array::BIND_OVERALL, 1);
     (*c)[0].set(1,1,0,1);
     geom->setColorArray(c);
-    geom->setColorBinding(geom->BIND_OVERALL);
     osgEarth::Symbology::SkinResourceVector skins;
     lib->getSkins(skins);
     OE_WARN << "num = " << skins.size() << "\n";
@@ -276,7 +276,7 @@ show(osg::ArgumentParser& arguments)
     root->addChild( geode );
     root->addChild( geode2 );
 
-    root->getOrCreateStateSet()->setMode(GL_LIGHTING, 0);
+    Lighting::set(root->getOrCreateStateSet(), 0);
     root->getOrCreateStateSet()->setMode(GL_CULL_FACE, 0);
 
     osgViewer::Viewer viewer;

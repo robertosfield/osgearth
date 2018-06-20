@@ -25,7 +25,7 @@
 #include <osgEarth/Capabilities>
 #include <osgEarth/DrapeableNode>
 #include <osgEarth/ClampableNode>
-#include <osgEarth/Lighting>
+#include <osgEarth/GLUtils>
 #include <osg/Notify>
 
 using namespace osgEarth;
@@ -289,7 +289,7 @@ FeatureModelSource::createNodeImplementation(const Map*        map,
 
     // Graph that will render feature models. May included paged data.
     FeatureModelGraph* graph = new FeatureModelGraph(session, _options, factory, getSceneGraphCallbacks());
-    graph->setSceneGraphCallbacks(getSceneGraphCallbacks());
+
     return graph;
 }
 
@@ -341,16 +341,9 @@ FeatureNodeFactory::getOrCreateStyleGroup(const Style& style,
         {
             osg::StateSet* stateset = group->getOrCreateStateSet();
 
-            stateset->setMode(
-                GL_LIGHTING,
+            GLUtils::setLighting(
+                stateset,
                 (render->lighting() == true ? osg::StateAttribute::ON : osg::StateAttribute::OFF) | osg::StateAttribute::OVERRIDE );
-
-            if ( Registry::capabilities().supportsGLSL() )
-            {
-                stateset->setDefine(OE_LIGHTING_DEFINE, render->lighting().get());
-                //stateset->addUniform( Registry::shaderFactory()->createUniformForGLMode(
-                //    GL_LIGHTING, render->lighting().value()));
-            }
         }
 
         if ( render->backfaceCulling().isSet() )

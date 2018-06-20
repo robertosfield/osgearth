@@ -603,6 +603,7 @@ GeoExtent GeoExtent::INVALID = GeoExtent();
 
 
 GeoExtent::GeoExtent():
+_srs(0L),
 _west(0.0),
 _width(-1.0),
 _south(0.0),
@@ -623,14 +624,22 @@ _height(-1.0)
 
 GeoExtent::GeoExtent(const SpatialReference* srs,
                      double west, double south, double east, double north ) :
-_srs( srs )
+_srs( srs ),
+_west(0.0),
+_width(-1.0),
+_south(0.0),
+_height(-1.0)
 {
     set(west, south, east, north);
 }
 
 
 GeoExtent::GeoExtent(const SpatialReference* srs, const Bounds& bounds) :
-_srs( srs )
+_srs(srs),
+_west(0.0),
+_width(-1.0),
+_south(0.0),
+_height(-1.0)
 {
     set(bounds.xMin(), bounds.yMin(), bounds.xMax(), bounds.yMax());
 }
@@ -1287,10 +1296,22 @@ GeoExtent::normalizeX(double x) const
 {
     if (isValid() && is_valid(x) && _srs->isGeographic())
     {
-        while (x < -180.0)
-            x += 360.0;
-        while ( x > 180.0 )
+        if (fabs(x) <= 180.0)
+        {
+            return x;
+        }
+
+        if (x < 0.0 || x >= 360.0)
+        {
+            x = fmod(x, 360.0);
+            if (x < 0.0)
+                x += 360.0;
+        }
+        
+        if (x > 180.0)
+        {
             x -= 360.0;
+        }
     }
     return x;
 }
@@ -1403,6 +1424,22 @@ GeoExtent::createScaleBias(const GeoExtent& rhs, osg::Matrix& output) const
 
 /***************************************************************************/
 
+DataExtent::DataExtent(const GeoExtent& extent, unsigned minLevel, unsigned maxLevel, const std::string &description) :
+GeoExtent(extent)
+{
+    _minLevel = minLevel;
+    _maxLevel = maxLevel;
+    _description = description;
+}
+
+DataExtent::DataExtent(const GeoExtent& extent, const std::string &description) :
+GeoExtent(extent),
+_minLevel( 0 ),
+_maxLevel( 0 )
+{
+    _description = description;
+}
+
 DataExtent::DataExtent(const GeoExtent& extent, unsigned minLevel,  unsigned maxLevel) :
 GeoExtent(extent)
 {
@@ -1415,6 +1452,14 @@ GeoExtent(extent),
 _maxLevel( 25 )
 {
     _minLevel = minLevel;
+}
+
+DataExtent::DataExtent(const GeoExtent& extent, unsigned minLevel, const std::string &description) :
+GeoExtent(extent),
+_maxLevel( 0 )
+{
+    _minLevel = minLevel;
+    _description = description;
 }
 
 DataExtent::DataExtent(const GeoExtent& extent ) :
@@ -1621,7 +1666,7 @@ namespace
         osg::Image *image = new osg::Image;
         image->allocateImage(ds->GetRasterXSize(), ds->GetRasterYSize(), 1, pixelFormat, dataType);
 
-        ds->RasterIO(
+        CPLErr err = ds->RasterIO(
             GF_Read, 
             0, 0, 
             image->s(), image->t(), 
@@ -1633,8 +1678,11 @@ namespace
             pixelBytes,
             pixelBytes * image->s(),
             1);
+        if ( err != CE_None )
+        {
+            OE_WARN << LC << "RasterIO failed.\n";
+        }
 
-//        ds->RasterIO(GF_Read, 0, 0, image->s(), image->t(), (void*)image->data(), image->s(), image->t(), GDT_Byte, 4, NULL, 4, 4 * image->s(), 1);
         ds->FlushCache();
 
         image->flipVertical();
@@ -1724,7 +1772,7 @@ namespace
 
         if ( srcDS )
         {
-            srcDS->RasterIO(
+            CPLErr err = srcDS->RasterIO(
                 GF_Write, 
                 0, 0,
                 clonedImage->s(), clonedImage->t(),
@@ -1737,6 +1785,10 @@ namespace
                 pixelBytes,
                 pixelBytes * image->s(),
                 1);
+            if ( err != CE_None )
+            {
+                OE_WARN << LC << "RasterIO failed.\n";
+            }
 
 
 #if 0

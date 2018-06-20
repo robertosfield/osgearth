@@ -39,9 +39,11 @@
 #include <osgEarth/ShaderGenerator>
 #include <osgEarth/SpatialReference>
 #include <osgEarth/MapModelChange>
-#include <osgEarth/Lighting>
 #include <osgEarth/ResourceReleaser>
+#include <osgEarth/Lighting>
+#include <osgEarth/GLUtils>
 #include <osgEarth/URI>
+#include <osgEarth/HorizonClipPlane>
 #include <osg/ArgumentParser>
 #include <osg/PagedLOD>
 #include <osgUtil/Optimizer>
@@ -67,17 +69,12 @@ namespace
 
         void onLayerAdded(Layer* layer, unsigned index) {
             _node->onLayerAdded(layer, index);
-            // for backwards compat until we refactor ModelLayer to use Layer::getNode
-            MapCallback::onLayerAdded(layer, index);
         }
         void onLayerRemoved(Layer* layer, unsigned index) {
             _node->onLayerRemoved(layer, index);
-            // for backwards compat until we refactor ModelLayer to use Layer::getNode
-            MapCallback::onLayerRemoved(layer, index);
         }
         void onLayerMoved(Layer* layer, unsigned oldIndex, unsigned newIndex) {
             _node->onLayerMoved(layer, oldIndex, newIndex);
-            MapCallback::onLayerMoved(layer, oldIndex, newIndex);
         }
         void onLayerEnabled(Layer* layer) {
             _node->onLayerAdded(layer, _node->getMap()->getIndexOfLayer(layer));
@@ -95,7 +92,7 @@ namespace
     {
         MapNodeObserverInstaller( MapNode* mapNode ) : _mapNode( mapNode ) { }
 
-        virtual void onPostMergeNode(osg::Node* node)
+        virtual void onPostMergeNode(osg::Node* node, osg::Object* sender)
         {
             if ( _mapNode.valid() && node )
             {
@@ -108,6 +105,28 @@ namespace
     };
 
     typedef std::vector< osg::ref_ptr<Extension> > Extensions;
+
+    // Cull callback that installs (and updates) a Horizon object in the NodeVisitor.
+    struct InstallHorizonCallback : public osg::NodeCallback
+    {
+        osg::EllipsoidModel _ellipsoid;
+        PerObjectFastMap<osg::Camera*, osg::ref_ptr<Horizon> > _horizons;
+
+        InstallHorizonCallback(const osg::EllipsoidModel& ellipsoid) :
+            _ellipsoid(ellipsoid) { }
+
+        void operator()(osg::Node* node, osg::NodeVisitor* nv)
+        {
+            osgUtil::CullVisitor* cv = static_cast<osgUtil::CullVisitor*>(nv);
+            osg::ref_ptr<Horizon> horizon = _horizons.get(cv->getCurrentCamera());
+            if (!horizon.valid())
+                horizon = new Horizon(_ellipsoid);
+
+            horizon->setEye(nv->getViewPoint());
+            horizon->put(*nv);
+            traverse(node, nv);
+        }
+    };
 }
 
 //---------------------------------------------------------------------------
@@ -313,10 +332,8 @@ MapNode::init()
     // initialize terrain-level lighting:
     if ( terrainOptions.enableLighting().isSet() )
     {
-        _terrainEngineContainer->getOrCreateStateSet()->setDefine(OE_LIGHTING_DEFINE, terrainOptions.enableLighting().get());
-
-        _terrainEngineContainer->getOrCreateStateSet()->setMode(
-            GL_LIGHTING,
+        GLUtils::setLighting(
+            _terrainEngineContainer->getOrCreateStateSet(),
             terrainOptions.enableLighting().value() ? 1 : 0 );
     }
 
@@ -372,17 +389,17 @@ MapNode::init()
 
     if ( _mapNodeOptions.enableLighting().isSet() )
     {
-        stateset->setDefine(OE_LIGHTING_DEFINE, terrainOptions.enableLighting().get());
-
-        stateset->setMode(
-            GL_LIGHTING,
+        GLUtils::setLighting(
+            stateset,
             _mapNodeOptions.enableLighting().value() ? 1 : 0);
     }
 
     // Add in some global uniforms
-    stateset->addUniform( new osg::Uniform("oe_isGeocentric", _map->isGeocentric()) );
     if ( _map->isGeocentric() )
     {
+        stateset->setDefine("OE_IS_GEOCENTRIC");
+
+#if 0 // remove since they are currently unused
         OE_INFO << LC << "Adding ellipsoid uniforms.\n";
 
         // for a geocentric map, use an ellipsoid unit-frame transform and its inverse:
@@ -402,6 +419,7 @@ MapNode::init()
             stateset->addUniform( new osg::Uniform("oe_ellipsoidFrameInverse", osg::Vec3f()) );
             stateset->addUniform( new osg::Uniform("oe_ellipsoidFrame", osg::Vec3f()) );
         }
+#endif
     }
 
     // install a default material for everything in the map
@@ -415,6 +433,12 @@ MapNode::init()
 
     // install a callback that sets the viewport size uniform:
     this->addCullCallback(new InstallViewportSizeUniform());
+
+    // install a callback that updates a horizon object and installs a clipping plane
+    if (getMapSRS()->isGeographic())
+    {
+        this->addCullCallback(new HorizonClipPlane(getMapSRS()->getEllipsoid()));
+    }
 
     // register for event traversals so we can deal with blacklisted filenames
     ADJUST_EVENT_TRAV_COUNT( this, 1 );
@@ -446,8 +470,6 @@ MapNode::getConfig() const
     Config mapConf("map");
     mapConf.set("version", "2");
 
-    MapFrame mapf( _map.get() );
-
     // the map and node options:
     Config optionsConf = _map->getInitialMapOptions().getConfig();
     optionsConf.merge( getMapNodeOptions().getConfig() );
@@ -455,7 +477,7 @@ MapNode::getConfig() const
 
     // the layers
     LayerVector layers;
-    mapf.getLayers(layers);
+    _map->getLayers(layers);
 
     for (LayerVector::const_iterator i = layers.begin(); i != layers.end(); ++i)
     {
@@ -614,7 +636,7 @@ MapNode::getLayerNodeGroup() const
 osg::Node*
 MapNode::getLayerNode(Layer* layer) const
 {
-    return layer ? layer->getOrCreateNode() : 0L;
+    return layer ? layer->getNode() : 0L;
 }
 
 
@@ -649,13 +671,13 @@ namespace
             Layer* layer = i->get();
             if (layer->getEnabled())
             {
-                osg::Node* node = layer->getOrCreateNode();
+                osg::Node* node = layer->getNode();
                 if (node)
                 {
                     osg::Group* container = new osg::Group();
                     container->setName(layer->getName());
                     container->addChild(node);
-                    container->setStateSet(layer->getStateSet());
+                    container->setStateSet(layer->getOrCreateStateSet());
                     layerNodes->addChild(container);
                 }
             }
@@ -672,91 +694,59 @@ MapNode::onLayerAdded(Layer* layer, unsigned index)
     // Communicate terrain resources to the layer:
     layer->setTerrainResources(getTerrainEngine()->getResources());
 
-    // Compatibility, until we refactor things.
-    ModelLayer* modelLayer = dynamic_cast<ModelLayer*>(layer);
-    if (modelLayer)
-    {
-        // TODO:  Why go through all the MapNodeObserver stuff when we can just pass in the MapNode here?
-        modelLayer->getOrCreateSceneGraph(_map.get(), 0L);
-
-        // Install the MapNodeObserverInstaller so that MapNodeObservers will be notified of the MapNode.
-        modelLayer->getSceneGraphCallbacks()->add(new MapNodeObserverInstaller(this));
-    }
+    // Each layer gets a callback to change the MapNode if necessary
+    layer->getSceneGraphCallbacks()->add(new MapNodeObserverInstaller(this));
 
     // Create the layer's node, if it has one:
-    osg::Node* node = layer->getOrCreateNode();
+    osg::Node* node = layer->getNode();
     if (node)
     {
-        // Call setMapNode on any MapNodeObservers on this initial creation.
-        MapNodeReplacer replacer( this );
-        //node->accept( replacer );
-
-        rebuildLayerNodes(_map.get(), _layerNodes);
-
         OE_DEBUG << LC << "Adding node from layer \"" << layer->getName() << "\" to the scene graph\n";
 
-        // TODO: move this logic into ModelLayer.
-        if (modelLayer)
-        {
-            ModelSource* ms = modelLayer->getModelSource();
-            if (ms)
-            {
-                // enfore a rendering bin if necessary:
-                if (ms->getOptions().renderOrder().isSet())
-                {
-                    osg::StateSet* mss = node->getOrCreateStateSet();
-                    mss->setRenderBinDetails(
-                        ms->getOptions().renderOrder().value(),
-                        mss->getBinName().empty() ? "DepthSortedBin" : mss->getBinName());
-                }
-                if (ms->getOptions().renderBin().isSet())
-                {
-                    osg::StateSet* mss = node->getOrCreateStateSet();
-                    mss->setRenderBinDetails(
-                        mss->getBinNumber(),
-                        ms->getOptions().renderBin().get());
-                }
-            }
-        }
+        // notify before adding it to the graph:
+        layer->getSceneGraphCallbacks()->firePreMergeNode(node);
+
+        // update the layer-to-node table (adds the node to the graph)
+        rebuildLayerNodes(_map.get(), _layerNodes);
+
+        // after putting it in the graph:
+        layer->getSceneGraphCallbacks()->firePostMergeNode(node);
     }
 }
 
 void
 MapNode::onLayerRemoved(Layer* layer, unsigned index)
 {
-    if (layer && layer->getOrCreateNode())
+    if (layer)
     {
-        rebuildLayerNodes(_map.get(), _layerNodes);
+        osg::Node* node = layer->getNode();
+        if (node)
+        {
+            layer->getSceneGraphCallbacks()->fireRemoveNode(node);
+            rebuildLayerNodes(_map.get(), _layerNodes);
+        }
     }
 }
 
 void
 MapNode::onLayerMoved(Layer* layer, unsigned oldIndex, unsigned newIndex)
 {
-    if (layer && layer->getOrCreateNode())
+    if (layer && layer->getNode())
     {
         rebuildLayerNodes(_map.get(), _layerNodes);
     }
 }
 
-namespace
+void
+MapNode::openMapLayers()
 {
-    struct MaskNodeFinder : public osg::NodeVisitor {
-        MaskNodeFinder() : osg::NodeVisitor( osg::NodeVisitor::TRAVERSE_ALL_CHILDREN ) { }
-        void apply( osg::Group& group ) {
-            if ( dynamic_cast<MaskNode*>( &group ) ) {
-                _groups.push_back( &group );
-            }
-            traverse(group);
-        }
-        std::list< osg::Group* > _groups;
-    };
-}
+    LayerVector layers;
+    _map->getLayers(layers);
 
-namespace
-{
-    template<typename T> void tryOpenLayer(T* layer)
+    for (LayerVector::const_iterator i = layers.begin(); i != layers.end(); ++i)
     {
+        Layer* layer = i->get();
+
         if (!layer->getStatus().isError())
         {
             const Status& status = layer->open();
@@ -765,19 +755,6 @@ namespace
                 OE_WARN << LC << "Failed to open layer \"" << layer->getName() << "\" ... " << status.message() << std::endl;
             }
         }
-    }
-}
-
-void
-MapNode::openMapLayers()
-{
-    MapFrame frame(_map.get());
-
-    for (LayerVector::const_iterator i = frame.layers().begin();
-        i != frame.layers().end();
-        ++i)
-    {
-        tryOpenLayer(i->get());
     }
 }
 

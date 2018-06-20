@@ -31,11 +31,14 @@ namespace osgEarth
     public:
         Shaders();
 
+        std::string ClipPlane;
         std::string DepthOffsetVertex;
         std::string DrapingVertex, DrapingFragment;
         std::string GPUClampingVertex, GPUClampingFragment, GPUClampingVertexLib;
         std::string InstancingVertex;
+        std::string LineDrawable;
         std::string PhongLightingVertex, PhongLightingFragment;
+        std::string TextVertex, TextFragment;
 	};	
 
 } // namespace osgEarth

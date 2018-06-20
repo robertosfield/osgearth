@@ -94,15 +94,27 @@ FeatureModelLayer::init()
     // Assign the layer's state set to the root node:
     _root->setStateSet(this->getOrCreateStateSet());
 
-    // Callbacks for paged data
-    _sgCallbacks = new SceneGraphCallbacks();
-
     // Graph needs rebuilding
     _graphDirty = true;
 
     // Depth sorting by default
     getOrCreateStateSet()->setRenderingHint(osg::StateSet::TRANSPARENT_BIN);
 
+}
+
+void FeatureModelLayer::setFeatureModelLayerOptions(const FeatureModelLayerOptions& options)
+{
+    *_options = options;
+    dirty();
+}
+
+void FeatureModelLayer::dirty()
+{
+    // feature source changed, so the graph needs rebuilding
+    _graphDirty = true;
+
+    // create the scene graph
+    create();
 }
 
 void
@@ -138,11 +150,7 @@ FeatureModelLayer::setFeatureSource(FeatureSource* source)
             return;
         }
 
-        // feature source changed, so the graph needs rebuilding
-        _graphDirty = true;
-
-        // create the scene graph
-        create();
+        dirty();
     }
 }
 
@@ -159,7 +167,7 @@ FeatureModelLayer::getCreateFeatureNodeFactoryCallback() const
 }
 
 osg::Node*
-FeatureModelLayer::getOrCreateNode()
+FeatureModelLayer::getNode() const
 {
     return _root.get();
 }
@@ -217,15 +225,24 @@ FeatureModelLayer::addedToMap(const Map* map)
             this,
             &FeatureModelLayer::setFeatureSourceLayer);
     }
-
-    // re-create the graph if necessary.
-    create();
+    else
+    {
+        // re-create the graph if necessary.
+        create();
+    }
 }
 
 void
 FeatureModelLayer::removedFromMap(const Map* map)
 {
     _featureSourceLayerListener.clear();
+    
+    if (_root.valid())
+    {
+        _root->removeChildren(0, _root->getNumChildren());
+    }
+
+    _session = 0L;
 }
 
 void
@@ -248,7 +265,7 @@ FeatureModelLayer::create()
                 _session.get(),
                 options(),
                 nodeFactory,
-                _sgCallbacks.get());
+                getSceneGraphCallbacks());
 
             _root->removeChildren(0, _root->getNumChildren());
             _root->addChild(fmg);
@@ -259,10 +276,13 @@ FeatureModelLayer::create()
             setStatus(Status::OK());
         }
 
-        else if (getStatus().isOK())
-        {
-            setStatus(Status(Status::ConfigurationError));
-        }
+        //else if (getStatus().isOK())
+        //{
+        //    if (!_featureSource.valid())
+        //        setStatus(Status(Status::ConfigurationError, "No feature source"));
+        //    else if (!_session.valid())
+        //        setStatus(Status(Status::ConfigurationError, "No Session"));
+        //}
     }
 }
 

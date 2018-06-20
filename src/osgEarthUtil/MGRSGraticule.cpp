@@ -33,7 +33,9 @@
 #include <osgEarth/PagedNode>
 #include <osgEarth/ShaderUtils>
 #include <osgEarth/Endian>
-#include <osgEarth/Lighting>
+#include <osgEarth/LineDrawable>
+#include <osgEarth/GLUtils>
+#include <osgEarth/Shaders>
 
 #include <osg/BlendFunc>
 #include <osg/PagedLOD>
@@ -41,6 +43,7 @@
 #include <osg/LogicOp>
 #include <osg/MatrixTransform>
 #include <osg/ClipNode>
+#include <osg/Version>
 #include <osgDB/FileNameUtils>
 #include <osgDB/ReaderWriter>
 //#include <osgDB/WriteFile>
@@ -60,12 +63,21 @@ using namespace osgEarth::Annotation;
 
 REGISTER_OSGEARTH_LAYER(mgrs_graticule, MGRSGraticule);
 
+#ifndef GL_CLIP_DISTANCE0
+#define GL_CLIP_DISTANCE0 0x3000
+#endif
+
+// whether to use SCREEN_COORDS to auto-size the text
+#define USE_SCREEN_COORDS
+
+
 //#define DEBUG_MODE
 
 //---------------------------------------------------------------------------
 
 MGRSGraticuleOptions::MGRSGraticuleOptions(const ConfigOptions& conf) :
-VisibleLayerOptions(conf)
+VisibleLayerOptions(conf),
+_useDefaultStyles(true)
 {
     _sqidURI.init(URI("../data/mgrs_sqid.bin", conf.referrer()));
     _styleSheet = new StyleSheet();
@@ -327,16 +339,32 @@ MGRSGraticule::init()
 
     osg::StateSet* ss = this->getOrCreateStateSet();
 
-    // make the shared depth attr:
+    // disable the depth buffer
     ss->setAttributeAndModes(
         new osg::Depth(osg::Depth::ALWAYS, 0.f, 1.f, false),
         osg::StateAttribute::ON);
+    
+    // activate horizon clipping
+    ss->setMode(GL_CLIP_DISTANCE0, 1);
 
-    ss->setMode( GL_LIGHTING, 0 );
-    ss->setMode( GL_BLEND, 1 );
+    // blending on to support transculency
+    ss->setMode(GL_BLEND, 1);
 
     // force it to render after the terrain.
     ss->setRenderBinDetails(1, "RenderBin");
+
+    _root = new LocalRoot();
+
+    GLUtils::setLighting(_root->getOrCreateStateSet(), osg::StateAttribute::OFF);
+
+    // install the range callback for clip plane activation
+    _root->addCullCallback( new RangeUniformCullCallback() );
+
+    if (getEnabled() == true)
+    {
+        rebuild();
+    }
+
 }
 
 void
@@ -353,20 +381,8 @@ MGRSGraticule::removedFromMap(const Map* map)
 }
 
 osg::Node*
-MGRSGraticule::getOrCreateNode()
+MGRSGraticule::getNode() const
 {
-    if (_root.valid() == false)
-    {
-        _root = new LocalRoot();
-
-        _root->getOrCreateStateSet()->setDefine(OE_LIGHTING_DEFINE, osg::StateAttribute::OFF);
-
-        // install the range callback for clip plane activation
-        _root->addCullCallback( new RangeUniformCullCallback() );
-
-        rebuild();
-    }
-
     return _root.get();
 }
 
@@ -781,6 +797,9 @@ namespace
             // make sure we get sufficient tessellation:
             compiler.options().maxGranularity() = 1.0;
 
+            // line shaders are at the root of the geometry tree, so don't install any
+            compiler.options().shaderPolicy() = SHADERPOLICY_INHERIT;
+
             FeatureList features;
 
             // longitudinal line:
@@ -823,8 +842,6 @@ namespace
             osg::Vec3d centerECEF;
             extent.getSRS()->transform( tileCenter, ecefSRS, centerECEF );
 
-            Registry::shaderGenerator().run(group, Registry::stateSetCache());
-    
             return ClusterCullingFactory::createAndInstall(group, centerECEF);
         }
         
@@ -867,7 +884,12 @@ namespace
                 const Feature* feature = f->get();
                 std::string sqid = feature->getString("sqid");
                 osgText::Text* drawable = symbolizer.create(sqid);
-                drawable->setCharacterSizeMode(drawable->SCREEN_COORDS);
+#ifdef USE_SCREEN_COORDS
+                drawable->setCharacterSizeMode(osgText::Text::SCREEN_COORDS);
+#else
+                drawable->setCharacterSizeMode(osgText::Text::OBJECT_COORDS);
+                drawable->setCharacterSize(13000);
+#endif
                 drawable->getOrCreateStateSet()->setRenderBinToInherit();
             
                 GeoExtent extent(feature->getSRS(), feature->getGeometry()->getBounds());
@@ -891,7 +913,7 @@ namespace
 
             OE_DEBUG << LC << "Created " << features.size() << " text elements for " << getName() << std::endl;
             
-            Registry::shaderGenerator().run(this, Registry::stateSetCache());
+            //Registry::shaderGenerator().run(this, Registry::stateSetCache());
         }
         
 #ifdef DEBUG_MODE
@@ -960,7 +982,12 @@ namespace
         
             TextSymbolizer symbolizer( textSym.get() );
             osgText::Text* drawable = symbolizer.create(getName());
+#ifdef USE_SCREEN_COORDS
             drawable->setCharacterSizeMode(osgText::Text::SCREEN_COORDS);
+#else
+            drawable->setCharacterSizeMode(osgText::Text::OBJECT_COORDS);
+            drawable->setCharacterSize(130000);
+#endif
             drawable->getOrCreateStateSet()->setRenderBinToInherit();
 
             const SpatialReference* ecef = f->getSRS()->getGeocentricSRS();
@@ -971,8 +998,6 @@ namespace
             ecef->createLocalToWorld( positionECEF, L2W );
             osg::MatrixTransform* mt = new osg::MatrixTransform(L2W);
             mt->addChild(drawable); 
-
-            Registry::shaderGenerator().run(drawable, Registry::stateSetCache());
 
             return ClusterCullingFactory::createAndInstall(mt, positionECEF);
         }
@@ -1031,19 +1056,6 @@ MGRSGraticule::rebuild()
     // rebuild the graph:
     osg::Group* top = _root.get();
 
-    // Horizon clipping plane.
-    osg::ClipPlane* cp = _clipPlane.get();
-    if ( cp == 0L )
-    {
-        osg::ClipNode* clipNode = new osg::ClipNode();
-        osgEarth::Registry::shaderGenerator().run( clipNode );
-        cp = new osg::ClipPlane( 0 );
-        clipNode->addClipPlane( cp );
-        _root->addChild(clipNode);
-        top = clipNode;
-    }
-    top->addCullCallback( new ClipToGeocentricHorizon(_profile->getSRS(), cp) );
-
 #if 0
     // Uncomment to write out a SQID data file
     writeSQIDfile(options().sqidData().get());
@@ -1060,10 +1072,14 @@ MGRSGraticule::rebuild()
             table[i->get()->getString("gzd")].push_back(i->get());
         }
 
-        osg::Group* geomTop = new osg::Group();
+        // Root of the geometry tree
+        osg::Group* geomTop = new LineGroup(); //osg::Group();
         top->addChild(geomTop);
 
+        // Root of the text tree
         osg::Group* textTop = new osg::Group();
+        osg::StateSet* textSS = textTop->getOrCreateStateSet();
+        TextSymbolizer::installShaders(textSS);
         top->addChild(textTop);
 
         // build the GZD feature set
@@ -1224,7 +1240,7 @@ MGRSGraticule::setUpDefaultStyles()
             line->stroke()->width() = 4.0;
             line->tessellation() = 20;
             TextSymbol* text = style.getOrCreate<TextSymbol>();
-            text->fill()->color() = Color::Gray;
+            text->fill()->color() = Color::White;
             text->halo()->color() = Color::Black;
             text->alignment() = TextSymbol::ALIGN_LEFT_BOTTOM;
             styles->addStyle(style);
@@ -1246,7 +1262,7 @@ MGRSGraticule::setUpDefaultStyles()
             line->stroke()->color().set(1,1,0,alpha);
             line->stroke()->width() = 3;
             TextSymbol* text = style.getOrCreate<TextSymbol>();
-            text->fill()->color() = Color::Gray;
+            text->fill()->color() = Color::White;
             text->halo()->color() = Color::Black;
             text->alignment() = TextSymbol::ALIGN_LEFT_BOTTOM;
             styles->addStyle(style);

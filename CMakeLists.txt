@@ -8,10 +8,13 @@ if(COMMAND cmake_policy)
     # Works around warnings about escaped quotes in ADD_DEFINITIONS
     # statements.
     cmake_policy(SET CMP0005 OLD)
-    
+
     # Qt5 qt5_use_modules usage was causing "Policy CMP0043 is not set: Ignore COMPILE_DEFINITIONS_<Config> properties." warnings
     cmake_policy(SET CMP0043 NEW)
 
+    # Double colon in target name means IMPORTED (and not ALIAS or IMPORTED).
+    # Fixes a warning when cache_rocksdb links to target "RocksDB::rocksdb"
+    cmake_policy(SET CMP0028 NEW)
 endif(COMMAND cmake_policy)
 
 #
@@ -49,6 +52,12 @@ SET(OpenThreads_SOURCE_DIR ${OSGEARTH_SOURCE_DIR})
 
 # Good place to look for the OSG 3rd party libs
 SET(THIRD_PARTY_DIR "" CACHE PATH "OSG 3rd-party dependency folder")
+
+IF(THIRD_PARTY_DIR)
+    LIST(APPEND CMAKE_INCLUDE_PATH ${THIRD_PARTY_DIR}/include)
+    LIST(APPEND CMAKE_LIBRARY_PATH ${THIRD_PARTY_DIR}/lib)
+    MESSAGE(STATUS "CMAKE_INCLUDE_PATH=${CMAKE_INCLUDE_PATH}")
+ENDIF(THIRD_PARTY_DIR)
 
 # We have some custom .cmake scripts not in the official distribution.
 # Maybe this can be used override existing behavior if needed?
@@ -119,16 +128,30 @@ FIND_PACKAGE(CURL)
 FIND_PACKAGE(GDAL)
 FIND_PACKAGE(GEOS)
 FIND_PACKAGE(Sqlite3)
-FIND_PACKAGE(ZLIB)
 FIND_PACKAGE(Poco)
 
 FIND_PACKAGE(LevelDB)
-FIND_PACKAGE(RocksDB)
+
+SET (WITH_STATIC_ROCKSDB FALSE CACHE BOOL "Use static library of RocksDB")
+
+IF(MINGW)
+    FIND_PACKAGE(RocksDB CONFIG)
+    IF(RocksDB_FOUND)
+        MESSAGE(STATUS "Found RocksDB " ${RocksDB_VERSION})
+    ENDIF()
+ELSE(MINGW)
+    IF (WITH_STATIC_ROCKSDB)
+      FIND_PACKAGE(RocksDB REQUIRED COMPONENTS STATIC)
+    ELSE()
+      FIND_PACKAGE(RocksDB)
+    ENDIF()
+ENDIF(MINGW)
 
 FIND_PACKAGE(SilverLining QUIET)
 FIND_PACKAGE(Triton QUIET)
 
 FIND_PACKAGE(Protobuf QUIET)
+SET (PROTOBUF_USE_DLLS FALSE CACHE BOOL "Set this to true if Protobuf is compiled as dll")
 
 SET (WITH_EXTERNAL_DUKTAPE FALSE CACHE BOOL "Use bundled or system wide version of Duktape")
 IF (WITH_EXTERNAL_DUKTAPE)
@@ -242,6 +265,7 @@ FIND_PACKAGE(OSG)
 INCLUDE_DIRECTORIES(
     ${OSGEARTH_SOURCE_DIR}/src
     ${OSG_INCLUDE_DIR}
+    ${OSG_GEN_INCLUDE_DIR}
 )
 
 #FIND_PACKAGE(GDAL)
@@ -325,6 +349,10 @@ ENDIF(INSTALL_TO_OSG_DIR)
 
 # osgEarth Examples
 OPTION(BUILD_OSGEARTH_EXAMPLES "Enable to build osgEarth Examples" ON)
+
+# Applications and tests
+OPTION(BUILD_APPLICATIONS "Enable build of Applications" ON)
+OPTION(BUILD_TESTS "Enable build of Tests" ON)
 
 # OE Core
 ADD_SUBDIRECTORY(src)

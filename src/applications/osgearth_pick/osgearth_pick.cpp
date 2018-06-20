@@ -23,6 +23,7 @@
 #include <osgEarth/Registry>
 #include <osgEarth/ShaderGenerator>
 #include <osgEarth/ObjectIndex>
+#include <osgEarth/GLUtils>
 #include <osgEarthUtil/EarthManipulator>
 #include <osgEarthUtil/ExampleResources>
 #include <osgEarthUtil/Controls>
@@ -196,7 +197,7 @@ setupRTTView(osgViewer::View* view, osg::Texture* rttTex)
     rttTex->setUnRefImageDataAfterApply( false );
     rttTex->setResizeNonPowerOfTwoHint(false);
 
-    stateSet->setMode(GL_LIGHTING, 0);
+    GLUtils::setLighting(stateSet, 0);
     stateSet->setMode(GL_CULL_FACE, 0);
     stateSet->setAttributeAndModes(new osg::BlendFunc(GL_ONE, GL_ZERO), 1);
     
@@ -307,7 +308,7 @@ main(int argc, char** argv)
     app.nameLabel = uiContainer->addControl( new ui::LabelControl( "---" ) );
 
     // Load up the earth file.
-    osg::Node* node = MapNodeHelper().load( arguments, app.mainView, uiContainer );
+    osg::Node* node = MapNodeHelper().load( arguments, &app.viewer, uiContainer );
     if ( node )
     {
         app.mainView->setSceneData( node );

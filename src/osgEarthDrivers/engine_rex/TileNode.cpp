@@ -32,6 +32,7 @@
 #include <osgEarth/TraversalData>
 #include <osgEarth/Shadowing>
 #include <osgEarth/Utils>
+#include <osgEarth/NodeUtils>
 #include <osgEarth/TraversalData>
 
 #include <osg/Uniform>
@@ -74,7 +75,8 @@ _lastTraversalFrame(0.0),
 _count(0),
 _stitchNormalMap(false),
 _empty(false),              // an "empty" node exists but has no geometry or children.,
-_isRootTile(false)
+_isRootTile(false),
+_imageUpdatesActive(false)
 {
     //nop
 }
@@ -89,20 +91,21 @@ TileNode::create(const TileKey& key, TileNode* parent, EngineContext* context)
 
     _key = key;
 
-    // Mask generator creates geometry from masking boundaries when they exist.
-    osg::ref_ptr<MaskGenerator> masks = new MaskGenerator(
-        key, 
-        context->getOptions().tileSize().get(),
-        context->getMap());
+    osg::ref_ptr<const Map> map = _context->getMap();
+    if (!map.valid())
+        return;
 
-    MapInfo mapInfo(context->getMap());
+    unsigned tileSize = context->getOptions().tileSize().get();
+
+    // Mask generator creates geometry from masking boundaries when they exist.
+    osg::ref_ptr<MaskGenerator> masks = new MaskGenerator(key, tileSize, map.get());
 
     // Get a shared geometry from the pool that corresponds to this tile key:
     osg::ref_ptr<SharedGeometry> geom;
     context->getGeometryPool()->getPooledGeometry(
         key,
-        mapInfo,         
-        context->getOptions().tileSize().get(),
+        MapInfo(map.get()),
+        tileSize,
         masks.get(), 
         geom);
 
@@ -128,7 +131,7 @@ TileNode::create(const TileKey& key, TileNode* parent, EngineContext* context)
     // Create the node to house the tile drawable:
     _surface = new SurfaceNode(
         key,
-        mapInfo,
+        MapInfo(map.get()),
         context->getRenderBindings(),
         surfaceDrawable );
     
@@ -382,7 +385,9 @@ TileNode::cull_stealth(TerrainCuller* culler)
     {
         for(int i=0; i<4; ++i)
         {
-            getSubTile(i)->accept( *culler );
+            TileNode* child = getSubTile(i);
+            if (child)
+                child->accept( *culler );
         }
     }
 
@@ -455,7 +460,9 @@ TileNode::cull(TerrainCuller* culler)
         {
             for(int i=0; i<4; ++i)
             {
-                getSubTile(i)->accept(*culler);
+                TileNode* child = getSubTile(i);
+                if (child)
+                    child->accept(*culler);
             }
         }
 
@@ -545,6 +552,41 @@ TileNode::traverse(osg::NodeVisitor& nv)
     // Everything else: update, GL compile, intersection, compute bound, etc.
     else
     {
+        // Check for image updates.
+        if (nv.getVisitorType() == nv.UPDATE_VISITOR && _imageUpdatesActive)
+        {
+            unsigned numUpdated = 0u;
+
+            for (unsigned p = 0; p < _renderModel._passes.size(); ++p)
+            {
+                RenderingPass& pass = _renderModel._passes[p];
+                Samplers& samplers = pass.samplers();
+                for (unsigned s = 0; s < samplers.size(); ++s)
+                {
+                    Sampler& sampler = samplers[s];
+                    if (sampler._texture.valid() && sampler._matrix.isIdentity())
+                    {
+                        for(unsigned i = 0; i < sampler._texture->getNumImages(); ++i)
+                        {
+                            osg::Image* image = sampler._texture->getImage(i);
+                            if (image && image->requiresUpdateCall())
+                            {
+                                image->update(&nv);
+                                numUpdated++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // if no updates were detected, don't check next time.
+            if (numUpdated == 0)
+            {
+                ADJUST_UPDATE_TRAV_COUNT(this, -1);
+                _imageUpdatesActive = false;
+            }
+        }
+
         // If there are child nodes, traverse them:
         int numChildren = getNumChildren();
         if ( numChildren > 0 )
@@ -632,9 +674,24 @@ TileNode::merge(const TerrainTileModel* model, const RenderBindings& bindings)
                         // TODO: consider hanging on to this texture and not applying it to
                         // the live tile until the RTT is complete. (Prevents unsightly flashing)
                         GeoNode* rttNode = dynamic_cast<GeoNode*>(model->getTexture()->getUserData());
-                        if (rttNode)
+
+                        if (rttNode && _context->getTileRasterizer())
                         {
                             _context->getTileRasterizer()->push(rttNode->_node.get(), model->getTexture(), rttNode->_extent);
+                        }
+                    }
+
+                    // check to see if this data requires an image update traversal.
+                    if (_imageUpdatesActive == false)
+                    {
+                        for(unsigned i=0; i<model->getTexture()->getNumImages(); ++i)
+                        {
+                            if (model->getTexture()->getImage(i)->requiresUpdateCall())
+                            {
+                                ADJUST_UPDATE_TRAV_COUNT(this, +1);
+                                _imageUpdatesActive = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -719,10 +776,12 @@ TileNode::merge(const TerrainTileModel* model, const RenderBindings& bindings)
 
     if (_childrenReady)
     {
-        getSubTile(0)->refreshInheritedData(this, bindings);
-        getSubTile(1)->refreshInheritedData(this, bindings);
-        getSubTile(2)->refreshInheritedData(this, bindings);
-        getSubTile(3)->refreshInheritedData(this, bindings);
+        for (int i = 0; i < 4; ++i)
+        {
+            TileNode* child = getSubTile(i);
+            if (child)
+                child->refreshInheritedData(this, bindings);
+        }
     }
 
     if (newElevationData)
@@ -901,10 +960,12 @@ TileNode::refreshInheritedData(TileNode* parent, const RenderBindings& bindings)
 
         if (_childrenReady)
         {
-            getSubTile(0)->refreshInheritedData(this, bindings);
-            getSubTile(1)->refreshInheritedData(this, bindings);
-            getSubTile(2)->refreshInheritedData(this, bindings);
-            getSubTile(3)->refreshInheritedData(this, bindings);
+            for (int i = 0; i < 4; ++i)
+            {
+                TileNode* child = getSubTile(i);
+                if (child)
+                    child->refreshInheritedData(this, bindings);
+            }
         }
     }
     else
@@ -922,7 +983,10 @@ TileNode::load(TerrainCuller* culler)
     
     // LOD priority is in the range [0..numLods]
     float lodPriority = (float)lod;
-    if ( _context->getOptions().highResolutionFirst() == false )
+
+    // If progressive mode is enabled, lower LODs get higher priority since
+    // we want to load them in order
+    if (_context->getOptions().progressive() == true)
         lodPriority = (float)(numLods - lod);
 
     float distance = culler->getDistanceToViewPoint(getBound().center(), true);

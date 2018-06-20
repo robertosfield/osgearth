@@ -28,7 +28,7 @@
 #include <osgEarth/MapNode>
 #include <osgEarth/NodeUtils>
 #include <osgEarth/ShaderUtils>
-#include <osgEarth/Lighting>
+#include <osgEarth/GLUtils>
 
 #include <osg/PolygonOffset>
 #include <osg/Depth>
@@ -113,16 +113,12 @@ AnnotationNode::traverse(osg::NodeVisitor& nv)
 }
 
 void
-AnnotationNode::setLightingIfNotSet( bool lighting )
+AnnotationNode::setDefaultLighting( bool lighting )
 {
-    osg::StateSet* ss = this->getOrCreateStateSet();
-
-    if ( ss->getMode(GL_LIGHTING) == osg::StateAttribute::INHERIT )
-    {
-        this->getOrCreateStateSet()->setMode(GL_LIGHTING,
-            lighting ? osg::StateAttribute::ON | osg::StateAttribute::PROTECTED :
-                       osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED );
-    }
+    GLUtils::setLighting(
+        getOrCreateStateSet(),
+        lighting ? osg::StateAttribute::ON | osg::StateAttribute::PROTECTED :
+                   osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED);
 }
 
 void
@@ -214,12 +210,9 @@ AnnotationNode::applyRenderSymbology(const Style& style)
 
         if ( render->lighting().isSet() )
         {
-            getOrCreateStateSet()->setDefine(
-                OE_LIGHTING_DEFINE,
+            GLUtils::setLighting(
+                getOrCreateStateSet(),
                 (render->lighting() == true? osg::StateAttribute::ON : osg::StateAttribute::OFF) | osg::StateAttribute::OVERRIDE );
-            //getOrCreateStateSet()->setMode(
-            //    GL_LIGHTING,
-            //    (render->lighting() == true? osg::StateAttribute::ON : osg::StateAttribute::OFF) | osg::StateAttribute::OVERRIDE );
         }
 
         if ( render->depthOffset().isSet() )

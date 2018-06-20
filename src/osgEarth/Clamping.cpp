@@ -22,6 +22,7 @@
 #include <osgEarth/Clamping>
 #include <osgEarth/CullingUtils>
 #include <osgEarth/Registry>
+#include <osgEarth/LineDrawable>
 #include <osg/Drawable>
 #include <osg/NodeVisitor>
 #include <osg/Geode>
@@ -55,31 +56,29 @@ namespace
             setNodeMaskOverride( ~0 );
         }
 
-        void apply(osg::Geometry* geom)
+        void applyGeometry(osg::Geometry* geom)
         {
-            if ( geom )
+            osg::Vec3Array* verts = static_cast<osg::Vec3Array*>(geom->getVertexArray());
+            osg::Vec4Array* anchors = new osg::Vec4Array();
+            anchors->setBinding(osg::Array::BIND_PER_VERTEX);
+            anchors->reserve( verts->size() );
+            for(unsigned i=0; i<verts->size(); ++i)
             {
-                osg::Vec3Array* verts = static_cast<osg::Vec3Array*>(geom->getVertexArray());
-                osg::Vec4Array* anchors = new osg::Vec4Array();
-                anchors->reserve( verts->size() );
-                for(unsigned i=0; i<verts->size(); ++i)
-                {
-                    anchors->push_back( osg::Vec4f(
-                        (*verts)[i].x(), (*verts)[i].y(),
-                        _verticalOffset,
-                        Clamping::ClampToGround) );
-                }
-
-                geom->setVertexAttribArray    (Clamping::AnchorAttrLocation, anchors);
-                geom->setVertexAttribBinding  (Clamping::AnchorAttrLocation, geom->BIND_PER_VERTEX);
-                geom->setVertexAttribNormalize(Clamping::AnchorAttrLocation, false);
+                anchors->push_back( osg::Vec4f(
+                    (*verts)[i].x(), (*verts)[i].y(),
+                    _verticalOffset,
+                    Clamping::ClampToGround) );
             }
+            geom->setVertexAttribArray(Clamping::AnchorAttrLocation, anchors);
         }
 
         void apply(osg::Drawable& drawable)
         {
             osg::Geometry* geom = drawable.asGeometry();
-            if (geom) apply(geom);
+            if (geom)
+            {
+                applyGeometry(geom);
+            }
         }
     };
 }
@@ -100,7 +99,7 @@ Clamping::applyDefaultClampingAttrs(osg::Geometry* geom, float verticalOffset)
     if ( geom )
     {
         ApplyDefaultsVisitor visitor( verticalOffset );
-        visitor.apply( geom );
+        visitor.apply( *geom );
     }
 }
 
@@ -120,9 +119,18 @@ Clamping::setHeights(osg::Geometry* geom, osg::FloatArray* hats)
 {
     if ( geom )
     {
-        geom->setVertexAttribArray( HeightsAttrLocation, hats );
-        geom->setVertexAttribBinding( HeightsAttrLocation, geom->BIND_PER_VERTEX );
-        geom->setVertexAttribNormalize( HeightsAttrLocation, false );
+        hats->setBinding(osg::Array::BIND_PER_VERTEX);
+        hats->setNormalize(false);
+
+        LineDrawable* line = dynamic_cast<LineDrawable*>(geom);
+        if (line)
+        {
+            line->importVertexAttribArray(HeightsAttrLocation, hats);
+        }
+        else
+        {
+            geom->setVertexAttribArray(HeightsAttrLocation, hats);
+        }
     }
 }
 

@@ -436,7 +436,7 @@ GeometryCompiler::compile(FeatureList&          workingSet,
 
         filter.maxGranularity() = *_options.maxGranularity();
         filter.geoInterp()      = *_options.geoInterp();
-        filter.useGPULines()    = *_options.useGPUScreenSpaceLines();
+        filter.shaderPolicy()   = *_options.shaderPolicy();
 
         if (_options.maxPolygonTilingAngle().isSet())
             filter.maxPolygonTilingAngle() = *_options.maxPolygonTilingAngle();
@@ -548,7 +548,8 @@ GeometryCompiler::compile(FeatureList&          workingSet,
     
 
     //test: dump the tile to disk
-    //osgDB::writeNodeFile( *(resultGroup.get()), "out.osg" );
+    //OE_WARN << "Writing GC node file to out.osgt..." << std::endl;
+    //osgDB::writeNodeFile( *(resultGroup.get()), "out.osgt" );
 
 #ifdef PROFILING
     static double totalTime = 0.0;

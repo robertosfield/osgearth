@@ -124,14 +124,19 @@ TritonContext::initialize(osg::RenderInfo& renderInfo)
                 _environment->SetConfigOption( "polar-earth-radius-meters",      poRadius.c_str() );
             }
 
+            //_environment->SetConfigOption("avoid-opengl-stalls", "yes");
+            //_environment->SetConfigOption("fft-texture-update-frame-delayed", "yes");
+
             float openGLVersion = osg::getGLVersionNumber();
             enum ::Triton::Renderer tritonOpenGlVersion = ::Triton::OPENGL_2_0;
-            if( openGLVersion == 4.1 )
+#ifndef OSG_GL_FIXED_FUNCTION_AVAILABLE
+            if( openGLVersion >= 4.1 )
                 tritonOpenGlVersion = ::Triton::OPENGL_4_1;
-            else if( openGLVersion == 4.0 )
+            else if( openGLVersion >= 4.0 )
                 tritonOpenGlVersion = ::Triton::OPENGL_4_0;
-            else if( openGLVersion == 3.2 )
+            else if( openGLVersion >= 3.2 )
                 tritonOpenGlVersion = ::Triton::OPENGL_3_2;
+#endif
 
             ::Triton::EnvironmentError err = _environment->Initialize(
                 cs,

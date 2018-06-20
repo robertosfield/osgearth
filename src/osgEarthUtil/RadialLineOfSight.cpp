@@ -21,6 +21,7 @@
 */
 #include <osgEarthUtil/RadialLineOfSight>
 #include <osgEarth/TerrainEngineNode>
+#include <osgEarth/GLUtils>
 #include <osgUtil/LineSegmentIntersector>
 #include <osgSim/LineOfSight>
 #include <osgUtil/IntersectionVisitor>
@@ -269,11 +270,10 @@ RadialLineOfSightNode::compute_line(osg::Node* node)
     verts->reserve(_numSpokes * 5);
     geometry->setVertexArray( verts );
 
-    osg::Vec4Array* colors = new osg::Vec4Array();
+    osg::Vec4Array* colors = new osg::Vec4Array(osg::Array::BIND_PER_VERTEX);
     colors->reserve( _numSpokes * 5 );
 
     geometry->setColorArray( colors );
-    geometry->setColorBinding(osg::Geometry::BIND_PER_VERTEX);
 
     osg::Vec3d previousEnd;
     osg::Vec3d firstEnd;
@@ -371,7 +371,7 @@ RadialLineOfSightNode::compute_line(osg::Node* node)
     osg::Geode* geode = new osg::Geode();
     geode->addDrawable( geometry );
 
-    getOrCreateStateSet()->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
+    GLUtils::setLighting(getOrCreateStateSet(), osg::StateAttribute::OFF);
 
     osg::MatrixTransform* mt = new osg::MatrixTransform;
     mt->setMatrix(osg::Matrixd::translate(_centerWorld));
@@ -415,11 +415,10 @@ RadialLineOfSightNode::compute_fill(osg::Node* node)
     verts->reserve(_numSpokes * 2);
     geometry->setVertexArray( verts );
 
-    osg::Vec4Array* colors = new osg::Vec4Array();
+    osg::Vec4Array* colors = new osg::Vec4Array(osg::Array::BIND_PER_VERTEX);
     colors->reserve( _numSpokes * 2 );
 
     geometry->setColorArray( colors );
-    geometry->setColorBinding(osg::Geometry::BIND_PER_VERTEX);
 
     osg::ref_ptr<osgUtil::IntersectorGroup> ivGroup = new osgUtil::IntersectorGroup();
 
@@ -562,7 +561,7 @@ RadialLineOfSightNode::compute_fill(osg::Node* node)
     osg::Geode* geode = new osg::Geode();
     geode->addDrawable( geometry );
 
-    getOrCreateStateSet()->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
+    GLUtils::setLighting(getOrCreateStateSet(), osg::StateAttribute::OFF);
     getOrCreateStateSet()->setMode(GL_BLEND, osg::StateAttribute::ON);
 
     osg::MatrixTransform* mt = new osg::MatrixTransform;

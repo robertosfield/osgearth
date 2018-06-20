@@ -36,6 +36,7 @@
 #include <osgEarth/ShaderFactory>
 #include <osgEarth/ShaderGenerator>
 #include <osgEarth/Shaders>
+#include <osgEarth/GLUtils>
 #include <osgEarth/Lighting>
 
 #include <osg/MatrixTransform>
@@ -101,10 +102,9 @@ namespace
             texCoords->reserve( latSegments * lonSegments );
             geom->setTexCoordArray( 0, texCoords );
 
-            normals = new osg::Vec3Array();
+            normals = new osg::Vec3Array(osg::Array::BIND_PER_VERTEX);
             normals->reserve( latSegments * lonSegments );
             geom->setNormalArray( normals );
-            geom->setNormalBinding(osg::Geometry::BIND_PER_VERTEX );
         }
 
         osg::DrawElementsUShort* el = new osg::DrawElementsUShort( GL_TRIANGLES );
@@ -259,10 +259,6 @@ SimpleSkyNode::initialize(const SpatialReference* srs)
         _lightPosUniform = new osg::Uniform(osg::Uniform::FLOAT_VEC3, "atmos_v3LightDir");
         _lightPosUniform->set( lightPos / lightPos.length() );
         stateset->addUniform( _lightPosUniform.get() );
-
-        // default GL_LIGHTING uniform setting
-        //stateset->addUniform(
-        //    Registry::shaderFactory()->createUniformForGLMode(GL_LIGHTING, 1) );
 
         stateset->setDefine(OE_LIGHTING_DEFINE, osg::StateAttribute::ON);
 
@@ -518,7 +514,7 @@ SimpleSkyNode::makeAtmosphere(const osg::EllipsoidModel* em)
     
     // configure the state set:
     osg::StateSet* atmosSet = drawable->getOrCreateStateSet();
-    atmosSet->setMode( GL_LIGHTING, osg::StateAttribute::OFF );
+    GLUtils::setLighting(atmosSet, osg::StateAttribute::OFF);
     atmosSet->setAttributeAndModes( new osg::CullFace(osg::CullFace::BACK), osg::StateAttribute::ON );
     atmosSet->setAttributeAndModes( new osg::Depth( osg::Depth::LESS, 0, 1, false ) ); // no depth write
     atmosSet->setAttributeAndModes( new osg::Depth(osg::Depth::ALWAYS, 0, 1, false) ); // no zbuffer
@@ -618,19 +614,29 @@ SimpleSkyNode::makeMoon()
     //       Right now just need to have this file somewhere in your OSG_FILE_PATH
     stateSet->setAttributeAndModes( new osg::Program(), osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED );
     osg::ref_ptr<osg::Image> image = osgDB::readRefImageFile( "moon_1024x512.jpg" );
+
     osg::Texture2D * texture = new osg::Texture2D( image );
     texture->setFilter(osg::Texture::MIN_FILTER,osg::Texture::LINEAR);
     texture->setFilter(osg::Texture::MAG_FILTER,osg::Texture::LINEAR);
     texture->setResizeNonPowerOfTwoHint(false);
     stateSet->setTextureAttributeAndModes( 0, texture, osg::StateAttribute::ON | osg::StateAttribute::PROTECTED);
+#ifdef OSG_GL3_AVAILABLE
+    // Adjust for loss of GL_LUMINANCE in glTexture2D's format parameter.  OSG handles the texture's internal format,
+    // but the format parameter comes from the image's pixel format field.
+    if (image.valid() && image->getPixelFormat() == GL_LUMINANCE)
+    {
+      image->setPixelFormat(GL_RED);
+      // Swizzle the RGB all to RED in order to match previous GL_LUMINANCE behavior
+      texture->setSwizzle(osg::Vec4i(GL_RED, GL_RED, GL_RED, GL_ONE));
+    }
+#endif
 
-    osg::Vec4Array* colors = new osg::Vec4Array(1);    
+    osg::Vec4Array* colors = new osg::Vec4Array(osg::Array::BIND_OVERALL, 1);    
     moonDrawable->setColorArray( colors );
-    moonDrawable->setColorBinding(osg::Geometry::BIND_OVERALL);
     (*colors)[0] = osg::Vec4(1, 1, 1, 1 );
 
     // configure the stateset
-    stateSet->setMode( GL_LIGHTING, osg::StateAttribute::ON );
+    GLUtils::setLighting(stateSet, osg::StateAttribute::ON );
     stateSet->setAttributeAndModes( new osg::CullFace( osg::CullFace::BACK ), osg::StateAttribute::ON);
     stateSet->setRenderBinDetails( BIN_MOON, "RenderBin" );
     stateSet->setAttributeAndModes( new osg::Depth(osg::Depth::ALWAYS, 0, 1, false), osg::StateAttribute::ON );
@@ -754,7 +760,7 @@ SimpleSkyNode::buildStarGeometry(const std::vector<StarData>& stars)
         if ( p->magnitude > maxMag ) maxMag = p->magnitude;
     }
 
-    osg::Vec4Array* colors = new osg::Vec4Array();
+    osg::Vec4Array* colors = new osg::Vec4Array(osg::Array::BIND_PER_VERTEX);
     for( p = stars.begin(); p != stars.end(); p++ )
     {
         float c = ( (p->magnitude-minMag) / (maxMag-minMag) );
@@ -766,15 +772,15 @@ SimpleSkyNode::buildStarGeometry(const std::vector<StarData>& stars)
 
     geometry->setVertexArray( coords );
     geometry->setColorArray( colors );
-    geometry->setColorBinding(osg::Geometry::BIND_PER_VERTEX);
     geometry->addPrimitiveSet( new osg::DrawArrays(osg::PrimitiveSet::POINTS, 0, coords->size()));
 
     osg::StateSet* sset = geometry->getOrCreateStateSet();
 
-#if !defined(OSG_GL3_AVAILABLE)
-    // In GL3, PointSprite is no longer available, and is always on.
-    sset->setTextureAttributeAndModes( 0, new osg::PointSprite(), osg::StateAttribute::ON );
-#endif
+    const osgEarth::Capabilities& caps = osgEarth::Registry::capabilities();
+    // In GL3 core profile, PointSprite is no longer available, and is always on.  However,
+    // in compatibility profile, PointSprite is available, required, and defaults off.
+    if (!caps.isCoreProfile())
+      sset->setTextureAttributeAndModes(0, new osg::PointSprite(), osg::StateAttribute::ON);
     sset->setMode( GL_VERTEX_PROGRAM_POINT_SIZE, osg::StateAttribute::ON );
 
     Shaders pkg;
@@ -806,7 +812,6 @@ SimpleSkyNode::buildStarGeometry(const std::vector<StarData>& stars)
     osg::Camera* cam = new osg::Camera();
     cam->getOrCreateStateSet()->setRenderBinDetails( BIN_STARS, "RenderBin" );
     cam->setRenderOrder( osg::Camera::NESTED_RENDER );
-    cam->setNearFarRatio(1e-9);
     cam->setComputeNearFarMode( osg::CullSettings::COMPUTE_NEAR_FAR_USING_BOUNDING_VOLUMES );
     cam->addChild( starGeode );
 

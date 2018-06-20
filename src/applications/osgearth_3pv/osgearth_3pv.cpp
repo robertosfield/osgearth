@@ -31,6 +31,7 @@
 #include <osgEarth/Viewpoint>
 #include <osgEarth/Horizon>
 #include <osgEarth/TraversalData>
+#include <osgEarth/Lighting>
 
 #include <osgEarthAnnotation/PlaceNode>
 
@@ -135,10 +136,9 @@ makeFrustumFromCamera( osg::Camera* camera )
     geom->setUseDisplayList( false );
     geom->setVertexArray( v );
 
-    osg::Vec4Array* c = new osg::Vec4Array;
+    osg::Vec4Array* c = new osg::Vec4Array(osg::Array::BIND_OVERALL);
     c->push_back( osg::Vec4( 1., 1., 0., 1. ) );
     geom->setColorArray( c );
-    geom->setColorBinding( osg::Geometry::BIND_OVERALL );
 
     GLushort idxLines[8] = {
         0, 5, 0, 6, 0, 7, 0, 8 };
@@ -153,7 +153,8 @@ makeFrustumFromCamera( osg::Camera* camera )
     osg::Geode* geode = new osg::Geode;
     geode->addDrawable( geom );
 
-    geode->getOrCreateStateSet()->setMode( GL_LIGHTING, osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED );
+    Lighting::set(geode->getOrCreateStateSet(), osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED );
+
     geode->getOrCreateStateSet()->setAttributeAndModes(new osg::LineWidth(2.0f), 1);
 
 
@@ -224,7 +225,7 @@ main( int argc, char** argv )
     }
 
     MapNodeHelper helper;
-    osg::ref_ptr<osg::Node> node = helper.load(arguments, viewer.getView(0));
+    osg::ref_ptr<osg::Node> node = helper.load(arguments, &viewer);
     if (!node.valid())
     {
         return -1;
